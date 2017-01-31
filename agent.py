@@ -2,36 +2,65 @@ import gym
 import universe  # register the universe environments
 from universe import wrappers
 import random
+from collections import deque
 from keras.layers.convolutional import Convolution2D, MaxPooling2D, ZeroPadding2D
 from keras.layers.normalization import BatchNormalization
 from keras.models import Sequential
 from keras.layers.core import Flatten, Dense, Dropout, Lambda
 from keras.optimizers import Adam
 
+state_memory = 10 # Current impl of how many frames to remember state from.
+state_queue = deque()
+
 def ConvBlock(model, layers, filters):
     for i in range(layers):
         model.add(ZeroPadding2D((1, 1)))
         model.add(Convolution2D(filters, 3, 3, activation='relu'))
         model.add(BatchNormalization())
-    model.add(MaxPooling2D((2, 2), strides=(2, 2)))
+    #model.add(MaxPooling2D((2, 2), strides=(2, 2))) # We care about positioning of the ball, and don't want to discard it. Ref nervanasys
+
 
 def create_action(observation_n):
     action_indexes = [random.randint(0, len(action_space) - 1) for ob in observation_n]  # TODO predict this value
     action_n = [action_space[indx] for indx in action_indexes]
     return action_n, action_indexes
 
+
+# Rewards for all observations in an episode.
+def discount_reward(rewards):
+    discount = 0.95
+    total_rewards = sum(rewards)
+    discounted_rewards = []
+    for i in range(rewards):
+        discounted_rewards.append(total_rewards)
+        total_rewards *= discount # progressively reduce reward for each action in the future.
+    return discounted_rewards
+
 def train_on_episode_state(state, model):
+    rewards = state[2]
+    observations = state[0]
+    for index in range(state_memory):
+        mean_reward = sum(rewards[index:index+state_memory])/state_memory
+        model.fit(observations[index:index+state_memory])
+
+        #TODO train on current memory-state
     model.fit([state[0], state[2]], state[1], len(state), nb_epoch=1)
     pass
+
+def predict_reward_of_state(state):
+    #predict up and down scores
+    #predict up and down scores for following N frames given the highest score action of each.
+        #So fan out in all directions and search for the optimal branch?
+    return 0
 
 def create_model(num_classes, size=(80,80)):
     model = Sequential()
     model.add(Lambda(input_shape=(3,)+size))
     ConvBlock(model, 1, 32)
     ConvBlock(model, 1, 64)
-    ConvBlock(model, 1, 128)
+    ConvBlock(model, 1, 64)
     model.add(Flatten())
-    model.add(Dense(1024, activation='relu'))
+    model.add(Dense(512, activation='relu'))
     model.add(BatchNormalization())
     model.add(Dense(num_classes, activation='softmax'))
 
@@ -42,8 +71,8 @@ env = gym.make('gym-core.PongDeterministic-v3')
 env.configure(remotes=1)
 env = wrappers.experimental.SafeActionSpace(env)
 action_space = [[('KeyEvent', 'ArrowRight', True), ('KeyEvent', 'ArrowLeft', False)],  # Right
-                [('KeyEvent', 'ArrowRight', False), ('KeyEvent', 'ArrowLeft', True)],  # Left
-                [('KeyEvent', 'ArrowRight', False), ('KeyEvent', 'ArrowRight', False)]]  # stand still
+                [('KeyEvent', 'ArrowRight', False), ('KeyEvent', 'ArrowLeft', True)]]  # Left
+                #[('KeyEvent', 'ArrowRight', False), ('KeyEvent', 'ArrowRight', False)]]  # stand still
 model = create_model(num_classes=len(action_space))
 observation_n = env.reset()
 
@@ -51,6 +80,7 @@ episode_state = []
 #greed_epsilon = 0.1 Hvordan implemente i modellen?
 
 #Test train on reward frames only? When hitting the ball.
+# Compress 4 frames together for state first? Add RNN to keep state later.
 
 while True:
     action_n, action_indexes = create_action(observation_n)
