@@ -8,9 +8,10 @@ from keras.layers.normalization import BatchNormalization
 from keras.models import Sequential
 from keras.layers.core import Flatten, Dense, Dropout, Lambda
 from keras.optimizers import Adam
+import numpy as np
 
-state_memory = 10 # Current impl of how many frames to remember state from.
-state_queue = deque()
+NUM_FRAMES_STATE = 4  # Current impl of how many frames to remember state from.
+REPLAY_MEMORY = 10  # Number of replays to store in memory for Experience Replay to randomly sample from.
 
 def ConvBlock(model, layers, filters):
     for i in range(layers):
@@ -27,6 +28,7 @@ def create_action(observation_n):
 
 
 # Rewards for all observations in an episode.
+# TODO how do we sample the reward given at a single frame if randomly sampled from the pool in Experience Replay.
 def discount_reward(rewards):
     discount = 0.95
     total_rewards = sum(rewards)
@@ -39,9 +41,9 @@ def discount_reward(rewards):
 def train_on_episode_state(state, model):
     rewards = state[2]
     observations = state[0]
-    for index in range(state_memory):
-        mean_reward = sum(rewards[index:index+state_memory])/state_memory
-        model.fit(observations[index:index+state_memory])
+    for index in range(NUM_FRAMES_STATE):
+        mean_reward = sum(rewards[index:index+NUM_FRAMES_STATE])/NUM_FRAMES_STATE
+        model.fit(observations[index:index+NUM_FRAMES_STATE])
 
         #TODO train on current memory-state
     model.fit([state[0], state[2]], state[1], len(state), nb_epoch=1)
@@ -53,9 +55,14 @@ def predict_reward_of_state(state):
         #So fan out in all directions and search for the optimal branch?
     return 0
 
+def update_n_dim_observation(buffer, observation):
+    buffer.appendleft(observation)
+    buffer.pop()  # TODO ensure this pops right side, and appends left-side
+    return np.array(list(buffer))
+
 def create_model(num_classes, size=(80,80)):
     model = Sequential()
-    model.add(Lambda(input_shape=(3,)+size))
+    model.add(Lambda(input_shape=(NUM_FRAMES_STATE,) + size))
     ConvBlock(model, 1, 32)
     ConvBlock(model, 1, 64)
     ConvBlock(model, 1, 64)
@@ -80,14 +87,31 @@ episode_state = []
 #greed_epsilon = 0.1 Hvordan implemente i modellen?
 
 #Test train on reward frames only? When hitting the ball.
-# Compress 4 frames together for state first? Add RNN to keep state later.
+# Compress 4 frames together for state first? Add RNN to keep state later. Pass frame to CNN & RNN, merge output in functional API
+
+
+## INit with 4 of the first frame.
+def init_n_dim_observation(observation_n):
+    n_dimensional_observation = deque()
+    for n in range(NUM_FRAMES_STATE):
+        n_dimensional_observation.appendleft(observation_n)
+    return n_dimensional_observation
+
+n_dimensional_observation = init_n_dim_observation(observation_n)
 
 while True:
     action_n, action_indexes = create_action(observation_n)
     observation_n, reward_n, done_n, info = env.step(action_n)
+    obs_n_with_movement = update_n_dim_observation(n_dimensional_observation, observation_n)
     episode_state.append((observation_n, reward_n, action_indexes))
     env.render()
     if done_n:
         train_on_episode_state(episode_state, model)
         episode_state = []
 
+
+
+# Given this collection of frames and action X, predict estimated discounted Reward.
+
+#  for action in action_space: predict(data, action) ## result = discounted reward.
+## np.argmax(results) == action to take, which predicts highest amount of future reward.
