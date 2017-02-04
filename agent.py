@@ -21,10 +21,17 @@ def ConvBlock(model, layers, filters):
     #model.add(MaxPooling2D((2, 2), strides=(2, 2))) # We care about positioning of the ball, and don't want to discard it. Ref nervanasys
 
 
-def create_action(observation_n):
-    action_indexes = [random.randint(0, len(action_space) - 1) for ob in observation_n]  # TODO predict this value
-    action_n = [action_space[indx] for indx in action_indexes]
-    return action_n, action_indexes
+def choose_action(observation_n):
+    #TODO do something smarter to keep track of action_space indexes.
+    #TODO random greedy epsilon 10% or something
+    if 0.1 > random.randint() / 10.0:
+        return random.randint(0, len(action_space) - 1)
+    else:
+        for action_n in range(action_space):
+            predictions = np.zeros(len(action_space))
+            obs_and_action = np.concatenate((observation_n, action_n), axis=1)
+            predictions[action_n] = model.predict(obs_and_action)
+            return np.argmax(predictions)
 
 
 # Rewards for all observations in an episode.
@@ -57,7 +64,7 @@ def predict_reward_of_state(state):
 
 def update_n_dim_observation(buffer, observation):
     buffer.appendleft(observation)
-    buffer.pop()  # TODO ensure this pops right side, and appends left-side
+    buffer.pop()
     return np.array(list(buffer))
 
 def create_model(num_classes, size=(80,80)):
@@ -100,7 +107,7 @@ def init_n_dim_observation(observation_n):
 n_dimensional_observation = init_n_dim_observation(observation_n)
 
 while True:
-    action_n, action_indexes = create_action(observation_n)
+    action_n, action_indexes = choose_action(observation_n)
     observation_n, reward_n, done_n, info = env.step(action_n)
     obs_n_with_movement = update_n_dim_observation(n_dimensional_observation, observation_n)
     episode_state.append((observation_n, reward_n, action_indexes))
@@ -108,10 +115,3 @@ while True:
     if done_n:
         train_on_episode_state(episode_state, model)
         episode_state = []
-
-
-
-# Given this collection of frames and action X, predict estimated discounted Reward.
-
-#  for action in action_space: predict(data, action) ## result = discounted reward.
-## np.argmax(results) == action to take, which predicts highest amount of future reward.
